@@ -61,17 +61,35 @@ class StatevectorExtractor:
     """
 
     def __init__(self, n_qubits: int, n_layers: int, n_features: int = 2,
-                 noise_model: str = "none", p_depol: float = 0.0, p_damping: float = 0.0):
+                 noise_model: str = "none", p_depol: float = 0.0, p_damping: float = 0.0,
+                 backend: str = "qiskit.aer"):
         self.n_qubits = n_qubits
         self.n_layers = n_layers
         self.n_features = n_features
         self.noise_model = noise_model
         self.p_depol = p_depol
         self.p_damping = p_damping
+        self.backend = backend
 
-        backend = "default.mixed" if noise_model != "none" else "default.qubit"
-        self.dev = qml.device(backend, wires=n_qubits)
-        self._circuit = self._build_circuit()
+        if backend == "qiskit.aer":
+            from qiskit_aer import AerSimulator
+            import qiskit_aer.noise as noise
+            if noise_model != "none":
+                ibm_noise = noise.NoiseModel()
+                err_1q = noise.depolarizing_error(p_depol, 1).compose(noise.phase_damping_error(p_damping))
+                err_2q = noise.depolarizing_error(p_depol, 2)
+                ibm_noise.add_all_qubit_quantum_error(err_1q, ['rx', 'ry', 'rz', 'u1', 'u2', 'u3', 'h', 'x', 'y', 'z'])
+                ibm_noise.add_all_qubit_quantum_error(err_2q, ['cx'])
+                self.sim = AerSimulator(method="density_matrix", noise_model=ibm_noise)
+            else:
+                self.sim = AerSimulator(method="statevector")
+            
+            # Precompute bit-reversal index map for fast big-endian Pennylane alignment
+            self.idx_map = [int(format(i, f"0{n_qubits}b")[::-1], 2) for i in range(2**n_qubits)]
+        else:
+            dev_backend = "default.mixed" if noise_model != "none" else "default.qubit"
+            self.dev = qml.device(dev_backend, wires=n_qubits)
+            self._circuit = self._build_circuit()
 
     def _build_circuit(self):
         n_qubits = self.n_qubits
@@ -112,12 +130,57 @@ class StatevectorExtractor:
         """
         Extract quantum state (statevector or density matrix) for each input sample.
         """
-        params_np = params_flat.astype(float)
-        states = []
-        for xi in X.numpy():
-            sv = self._circuit(params_np, xi)
-            states.append(np.array(sv))
-        return np.array(states)
+        if self.backend == "qiskit.aer":
+            import qiskit
+            params_np = params_flat.astype(float)
+            states = []
+            
+            # Construct a batch of Qiskit circuits
+            circuits = []
+            for xi in X.numpy():
+                qc = qiskit.QuantumCircuit(self.n_qubits)
+                # AngleEmbedding: default is RX rotation
+                for i in range(min(self.n_features, self.n_qubits)):
+                    qc.rx(float(xi[i]), i)
+                
+                p = params_np.reshape(self.n_layers, self.n_qubits, 2)
+                for layer in range(self.n_layers):
+                    for q in range(self.n_qubits):
+                        qc.ry(p[layer, q, 0], q)
+                        qc.rz(p[layer, q, 1], q)
+                    for q in range(self.n_qubits):
+                        qc.cx(q, (q + 1) % self.n_qubits)
+                
+                if self.noise_model != "none":
+                    qc.save_density_matrix()
+                else:
+                    qc.save_statevector()
+                circuits.append(qc)
+            
+            # Run transpilation and simulation as a batch
+            circuits_tr = qiskit.transpile(circuits, self.sim)
+            job = self.sim.run(circuits_tr)
+            results = job.result()
+            
+            for i in range(len(X)):
+                data = results.data(i)
+                if self.noise_model != "none":
+                    dm = np.asarray(data["density_matrix"])
+                    # Apply bit-reversal mapping for rows and columns
+                    dm_pl = dm[self.idx_map][:, self.idx_map]
+                    states.append(dm_pl)
+                else:
+                    sv = np.asarray(data["statevector"])
+                    sv_pl = sv[self.idx_map]
+                    states.append(sv_pl)
+            return np.array(states)
+        else:
+            params_np = params_flat.astype(float)
+            states = []
+            for xi in X.numpy():
+                sv = self._circuit(params_np, xi)
+                states.append(np.array(sv))
+            return np.array(states)
 
 
 # ─────────────────────────────────────────────
@@ -176,7 +239,8 @@ def deploy(cfg: GSQConfig = None) -> dict:
     # Rebuild model and load weights
     model = VQCClassifier(
         n_qubits=n_qubits, n_layers=n_layers, n_features=cfg.n_features,
-        noise_model=cfg.noise_model, p_depol=cfg.p_depol, p_damping=cfg.p_damping
+        noise_model=cfg.noise_model, p_depol=cfg.p_depol, p_damping=cfg.p_damping,
+        backend=cfg.backend
     )
     model.set_params_flat(params_pt)
 
@@ -196,7 +260,8 @@ def deploy(cfg: GSQConfig = None) -> dict:
     # Build statevector extractor once (Issue #6)
     sv_extractor = StatevectorExtractor(
         n_qubits, n_layers, cfg.n_features,
-        noise_model=cfg.noise_model, p_depol=cfg.p_depol, p_damping=cfg.p_damping
+        noise_model=cfg.noise_model, p_depol=cfg.p_depol, p_damping=cfg.p_damping,
+        backend=cfg.backend
     )
 
     # ── Branch 1: Ideal (no quantization) ──────────────────────────

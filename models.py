@@ -41,7 +41,8 @@ class VQCClassifier(nn.Module):
     """
 
     def __init__(self, n_qubits: int = 4, n_layers: int = 2, n_features: int = 2,
-                 noise_model: str = "none", p_depol: float = 0.0, p_damping: float = 0.0):
+                 noise_model: str = "none", p_depol: float = 0.0, p_damping: float = 0.0,
+                 backend: str = "default.qubit"):
         super().__init__()
         self.n_qubits = n_qubits
         self.n_layers = n_layers
@@ -49,15 +50,30 @@ class VQCClassifier(nn.Module):
         self.noise_model = noise_model
         self.p_depol = p_depol
         self.p_damping = p_damping
+        self.backend = backend
 
         # Trainable parameters: shape (n_layers, n_qubits, 2)
         n_params = n_layers * n_qubits * 2
         init = torch.zeros(n_params).uniform_(-np.pi, np.pi)
         self.params = nn.Parameter(init)
 
-        # Choose mixed-state backend if we simulate depolarizing noise
-        backend = "default.mixed" if noise_model != "none" else "default.qubit"
-        self.dev = build_device(n_qubits, backend=backend)
+        # Choose device backend and instantiate
+        if backend == "qiskit.aer":
+            if noise_model != "none":
+                import qiskit_aer.noise as noise
+                ibm_noise_model = noise.NoiseModel()
+                # 1-qubit depolarizing composed with phase damping
+                err_1q = noise.depolarizing_error(p_depol, 1).compose(noise.phase_damping_error(p_damping))
+                # 2-qubit depolarizing for CX/CNOT gate
+                err_2q = noise.depolarizing_error(p_depol, 2)
+                ibm_noise_model.add_all_qubit_quantum_error(err_1q, ['rx', 'ry', 'rz', 'u1', 'u2', 'u3', 'h', 'x', 'y', 'z'])
+                ibm_noise_model.add_all_qubit_quantum_error(err_2q, ['cx'])
+                self.dev = qml.device("qiskit.aer", wires=n_qubits, noise_model=ibm_noise_model)
+            else:
+                self.dev = qml.device("qiskit.aer", wires=n_qubits)
+        else:
+            dev_backend = "default.mixed" if noise_model != "none" else "default.qubit"
+            self.dev = qml.device(dev_backend, wires=n_qubits)
         self.qnode = self._build_qnode()
 
     def _build_qnode(self):
@@ -68,6 +84,7 @@ class VQCClassifier(nn.Module):
         noise_model = self.noise_model
         p_depol = self.p_depol
         p_damping = self.p_damping
+        backend = self.backend
 
         @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
         def circuit(params, x):
@@ -82,7 +99,7 @@ class VQCClassifier(nn.Module):
                 for q in range(n_qubits):
                     qml.RY(p[layer, q, 0], wires=q)
                     qml.RZ(p[layer, q, 1], wires=q)
-                    if noise_model == "depolarizing":
+                    if noise_model == "depolarizing" and backend != "qiskit.aer":
                         if p_depol > 0:
                             qml.DepolarizingChannel(p_depol, wires=q)
                         if p_damping > 0:
@@ -91,7 +108,7 @@ class VQCClassifier(nn.Module):
                     ctrl = q
                     target = (q + 1) % n_qubits
                     qml.CNOT(wires=[ctrl, target])
-                    if noise_model == "depolarizing":
+                    if noise_model == "depolarizing" and backend != "qiskit.aer":
                         if p_depol > 0:
                             qml.DepolarizingChannel(p_depol, wires=ctrl)
                             qml.DepolarizingChannel(p_depol, wires=target)

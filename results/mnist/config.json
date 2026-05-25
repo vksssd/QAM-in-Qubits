@@ -2,6 +2,7 @@
   "n_qubits": 4,
   "n_layers": 2,
   "n_features": 2,
+  "backend": "qiskit.aer",
   "noise_model": "none",
   "p_depol": 0.01,
   "p_damping": 0.02,
@@ -22,5 +23,5 @@
   "test_acc_every": 5,
   "save_dir": "results/mnist",
   "fig_dir": "figures",
-  "seed": 42
+  "seed": 46
 }

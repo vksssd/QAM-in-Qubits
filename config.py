@@ -23,6 +23,7 @@ class GSQConfig:
     n_features: int = 2
 
     # ── Noisy QPU Emulation ───────────────────────────────
+    backend: str = "qiskit.aer" # Backend device name (e.g., "qiskit.aer" or "default.mixed")
     noise_model: str = "none"  # "none" or "depolarizing"
     p_depol: float = 0.01      # Depolarizing probability
     p_damping: float = 0.02    # Phase damping probability
