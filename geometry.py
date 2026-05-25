@@ -45,16 +45,38 @@ def fubini_study_distortion(
 
     D_FS = E_x[ d_FS(psi(theta, x), psi(theta_hat, x))^2 ]
 
-    Args:
-        states_train:  (n_samples, 2^n_qubits) complex array — trained circuit states
-        states_deploy: (n_samples, 2^n_qubits) complex array — quantized circuit states
-    Returns:
-        Scalar D_FS value.
+    Supports both pure statevectors (ndim=2) and noisy mixed density matrices (ndim=3).
     """
     assert states_train.shape == states_deploy.shape
-    overlaps = np.abs(np.einsum('ij,ij->i', states_train.conj(), states_deploy))
-    overlaps = np.clip(overlaps, 0.0, 1.0)
-    return float(np.mean(np.arccos(overlaps) ** 2))
+
+    if states_train.ndim == 2:
+        # Pure state vectors: (n_samples, 2^n)
+        overlaps = np.abs(np.einsum('ij,ij->i', states_train.conj(), states_deploy))
+        overlaps = np.clip(overlaps, 0.0, 1.0)
+        return float(np.mean(np.arccos(overlaps) ** 2))
+    elif states_train.ndim == 3:
+        # Mixed state density matrices: (n_samples, 2^n, 2^n)
+        from scipy.linalg import sqrtm
+        dists = []
+        for i in range(len(states_train)):
+            rho = states_train[i]
+            sigma = states_deploy[i]
+            try:
+                # Bures fidelity: F = (Tr(sqrt(sqrt(rho) * sigma * sqrt(rho))))^2
+                sqrt_rho = sqrtm(rho)
+                temp = sqrt_rho @ sigma @ sqrt_rho
+                sqrt_temp = sqrtm(temp)
+                fid = float(np.real(np.trace(sqrt_temp)) ** 2)
+                fid = np.clip(fid, 0.0, 1.0)
+                dists.append(np.arccos(np.sqrt(fid)) ** 2)
+            except Exception:
+                # Numerical fallback: Tr(rho * sigma)
+                overlap = float(np.real(np.trace(rho @ sigma)))
+                overlap = np.clip(overlap, 0.0, 1.0)
+                dists.append(np.arccos(np.sqrt(overlap)) ** 2)
+        return float(np.mean(dists))
+    else:
+        raise ValueError(f"Invalid state array dimension: {states_train.ndim}")
 
 
 def deployment_shock(

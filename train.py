@@ -22,7 +22,7 @@ import torch.nn as nn
 from torch.optim import Adam
 
 from config import GSQConfig
-from data import load_two_moons_train
+from data import load_dataset_train
 from models import VQCClassifier
 
 
@@ -101,18 +101,14 @@ def train(cfg: GSQConfig = None) -> dict:
     print(f"  tau={cfg.tau}  lambda_max={cfg.lambda_max}  k={cfg.k_period}")
     print(f"{'='*55}\n")
 
-    # Data (saves scaler to disk)
-    X_tr, X_te, y_tr, y_te = load_two_moons_train(
-        n_samples=cfg.n_samples,
-        noise=cfg.noise,
-        test_size=cfg.test_size,
-        random_state=cfg.seed,
-        save_dir=cfg.save_dir,
-    )
+    # Data (saves scaler and PCA to disk)
+    X_tr, X_te, y_tr, y_te = load_dataset_train(cfg)
 
     # Model
-    model = VQCClassifier(n_qubits=cfg.n_qubits, n_layers=cfg.n_layers,
-                          n_features=cfg.n_features)
+    model = VQCClassifier(
+        n_qubits=cfg.n_qubits, n_layers=cfg.n_layers, n_features=cfg.n_features,
+        noise_model=cfg.noise_model, p_depol=cfg.p_depol, p_damping=cfg.p_damping
+    )
     optimizer = Adam(model.parameters(), lr=cfg.lr)
 
     history = {
@@ -220,6 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_samples",   type=int,   default=None)
     parser.add_argument("--save_dir",    type=str,   default=None)
     parser.add_argument("--seed",        type=int,   default=None)
+    parser.add_argument("--dataset",     type=str,   default=None)
     args = parser.parse_args()
 
     cfg = GSQConfig.from_args(args)

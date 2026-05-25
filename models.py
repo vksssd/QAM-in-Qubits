@@ -40,18 +40,24 @@ class VQCClassifier(nn.Module):
     Output: expectation value in [-1, 1], thresholded at 0 for class prediction.
     """
 
-    def __init__(self, n_qubits: int = 4, n_layers: int = 2, n_features: int = 2):
+    def __init__(self, n_qubits: int = 4, n_layers: int = 2, n_features: int = 2,
+                 noise_model: str = "none", p_depol: float = 0.0, p_damping: float = 0.0):
         super().__init__()
         self.n_qubits = n_qubits
         self.n_layers = n_layers
         self.n_features = n_features
+        self.noise_model = noise_model
+        self.p_depol = p_depol
+        self.p_damping = p_damping
 
         # Trainable parameters: shape (n_layers, n_qubits, 2)
         n_params = n_layers * n_qubits * 2
         init = torch.zeros(n_params).uniform_(-np.pi, np.pi)
         self.params = nn.Parameter(init)
 
-        self.dev = build_device(n_qubits)
+        # Choose mixed-state backend if we simulate depolarizing noise
+        backend = "default.mixed" if noise_model != "none" else "default.qubit"
+        self.dev = build_device(n_qubits, backend=backend)
         self.qnode = self._build_qnode()
 
     def _build_qnode(self):
@@ -59,14 +65,37 @@ class VQCClassifier(nn.Module):
         n_qubits = self.n_qubits
         n_layers = self.n_layers
         n_features = self.n_features
+        noise_model = self.noise_model
+        p_depol = self.p_depol
+        p_damping = self.p_damping
 
         @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
         def circuit(params, x):
             # Encode input via AngleEmbedding (first n_features qubits)
             qml.AngleEmbedding(x, wires=range(min(n_features, n_qubits)))
+            
             # Variational ansatz
             p = params.reshape(n_layers, n_qubits, 2)
-            hardware_efficient_ansatz(p, n_qubits, n_layers)
+            
+            # Hardware-efficient ansatz with QPU gate noise
+            for layer in range(n_layers):
+                for q in range(n_qubits):
+                    qml.RY(p[layer, q, 0], wires=q)
+                    qml.RZ(p[layer, q, 1], wires=q)
+                    if noise_model == "depolarizing":
+                        if p_depol > 0:
+                            qml.DepolarizingChannel(p_depol, wires=q)
+                        if p_damping > 0:
+                            qml.PhaseDamping(p_damping, wires=q)
+                for q in range(n_qubits):
+                    ctrl = q
+                    target = (q + 1) % n_qubits
+                    qml.CNOT(wires=[ctrl, target])
+                    if noise_model == "depolarizing":
+                        if p_depol > 0:
+                            qml.DepolarizingChannel(p_depol, wires=ctrl)
+                            qml.DepolarizingChannel(p_depol, wires=target)
+            
             return qml.expval(qml.PauliZ(0))
 
         return circuit

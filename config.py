@@ -22,6 +22,14 @@ class GSQConfig:
     n_layers: int = 2
     n_features: int = 2
 
+    # ── Noisy QPU Emulation ───────────────────────────────
+    noise_model: str = "none"  # "none" or "depolarizing"
+    p_depol: float = 0.01      # Depolarizing probability
+    p_damping: float = 0.02    # Phase damping probability
+
+    # ── Dataset ───────────────────────────────────────────
+    dataset: str = "two_moons"  # "two_moons" or "mnist"
+
     # ── Training (Phases I & II) ──────────────────────────
     epochs: int = 100
     lr: float = 0.05
@@ -50,6 +58,12 @@ class GSQConfig:
     save_dir: str = "results"
     fig_dir: str = "figures"
     seed: int = 42
+
+    def __post_init__(self):
+        # Isolate results for different datasets to avoid collisions
+        if self.save_dir == "results":
+            self.save_dir = os.path.join("results", self.dataset)
+
 
     def save(self, path: str = None):
         """Serialize config to JSON."""

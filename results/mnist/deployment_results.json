@@ -1,0 +1,32 @@
+{
+  "K": 8,
+  "alpha": 0.5,
+  "n_qubits": 4,
+  "n_layers": 2,
+  "trajectory_size": 22,
+  "m0": {
+    "accuracy": 0.92,
+    "D_FS": 0.43496238803896425,
+    "delta": 0.0644279965381904
+  },
+  "ideal": {
+    "accuracy": 0.99,
+    "D_FS": 0.0,
+    "delta": 0.0
+  },
+  "euclidean": {
+    "accuracy": 0.99,
+    "D_FS": 0.0004394971888343519,
+    "delta": 7.959522928472272e-06
+  },
+  "gsq": {
+    "accuracy": 0.99,
+    "D_FS": 0.0004389005570524248,
+    "delta": 7.958240558242347e-06
+  },
+  "improvement": {
+    "acc_vs_euclid": 0.0,
+    "D_FS_reduction": 0.0013575295577657072,
+    "shock_reduction": 0.00016109120486787194
+  }
+}
