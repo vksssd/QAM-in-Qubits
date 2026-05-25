@@ -1,0 +1,15 @@
+# GSQ — Geometric Spectral Quantization
+# Pinned dependencies for reproducibility
+#
+# Install: pip install -r requirements.txt
+pennylane==0.39.0
+pennylane-lightning==0.39.0
+torch>=2.0.0
+numpy>=2.0.0,<3.0.0
+scikit-learn>=1.5.0
+matplotlib>=3.9.0
+joblib>=1.3.0
+jax>=0.4.30,<0.5.0
+jaxlib>=0.4.30,<0.5.0
+autoray==0.6.12
+pandas>=2.0.0

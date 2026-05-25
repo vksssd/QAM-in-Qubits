@@ -1,0 +1,22 @@
+{
+  "n_qubits": 4,
+  "n_layers": 2,
+  "n_features": 2,
+  "epochs": 10,
+  "lr": 0.05,
+  "tau": 0.6,
+  "lambda_max": 0.3,
+  "k_period": 2,
+  "k_rate": 5.0,
+  "n_samples": 50,
+  "test_size": 0.25,
+  "noise": 0.15,
+  "K": 8,
+  "alpha": 0.5,
+  "n_relaxation_steps": 3,
+  "trajectory_save_every": 5,
+  "test_acc_every": 5,
+  "save_dir": "/Users/vinayak/Downloads/files/results",
+  "fig_dir": "figures",
+  "seed": 42
+}
