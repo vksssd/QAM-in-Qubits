@@ -74,7 +74,7 @@ class StatevectorExtractor:
         if backend == "qiskit.aer":
             from qiskit_aer import AerSimulator
             import qiskit_aer.noise as noise
-            if noise_model != "none":
+            if noise_model != "none" and n_qubits < 12:
                 ibm_noise = noise.NoiseModel()
                 err_1q = noise.depolarizing_error(p_depol, 1).compose(noise.phase_damping_error(p_damping))
                 err_2q = noise.depolarizing_error(p_depol, 2)
@@ -82,7 +82,9 @@ class StatevectorExtractor:
                 ibm_noise.add_all_qubit_quantum_error(err_2q, ['cx'])
                 self.sim = AerSimulator(method="density_matrix", noise_model=ibm_noise)
             else:
+                # Force statevector simulation for N >= 12 to prevent exponential memory explosion
                 self.sim = AerSimulator(method="statevector")
+                self.noise_model = "none"
             
             # Precompute bit-reversal index map for fast big-endian Pennylane alignment
             self.idx_map = [int(format(i, f"0{n_qubits}b")[::-1], 2) for i in range(2**n_qubits)]
@@ -151,7 +153,7 @@ class StatevectorExtractor:
                     for q in range(self.n_qubits):
                         qc.cx(q, (q + 1) % self.n_qubits)
                 
-                if self.noise_model != "none":
+                if self.noise_model != "none" and self.n_qubits < 12:
                     qc.save_density_matrix()
                 else:
                     qc.save_statevector()
@@ -164,7 +166,7 @@ class StatevectorExtractor:
             
             for i in range(len(X)):
                 data = results.data(i)
-                if self.noise_model != "none":
+                if self.noise_model != "none" and self.n_qubits < 12:
                     dm = np.asarray(data["density_matrix"])
                     # Apply bit-reversal mapping for rows and columns
                     dm_pl = dm[self.idx_map][:, self.idx_map]
@@ -187,11 +189,39 @@ class StatevectorExtractor:
 # Output (expectation value) extraction
 # ─────────────────────────────────────────────
 
+def compute_expectation_from_states(states: np.ndarray) -> np.ndarray:
+    """
+    Compute expectation value of Z_0 (Pauli-Z on qubit 0) directly from states.
+    states: shape (batch, 2^N) for statevectors, or (batch, 2^N, 2^N) for density matrices.
+    """
+    dim = states.shape[1]
+    half_dim = dim // 2
+    
+    if states.ndim == 2:
+        # Statevectors: shape (batch, 2^N)
+        prob_0 = np.sum(np.abs(states[:, :half_dim])**2, axis=1)
+        prob_1 = np.sum(np.abs(states[:, half_dim:])**2, axis=1)
+        return prob_0 - prob_1
+    elif states.ndim == 3:
+        # Density matrices: shape (batch, 2^N, 2^N)
+        diags = np.diagonal(states, axis1=1, axis2=2)
+        prob_0 = np.sum(np.real(diags[:, :half_dim]), axis=1)
+        prob_1 = np.sum(np.real(diags[:, half_dim:]), axis=1)
+        return prob_0 - prob_1
+    else:
+        raise ValueError(f"Invalid state dimension: {states.ndim}")
+
+
 def get_outputs(model: VQCClassifier, X: torch.Tensor,
-                params_flat: np.ndarray) -> np.ndarray:
+                params_flat: np.ndarray, sv_extractor: StatevectorExtractor = None) -> np.ndarray:
     """
     Get Pauli-Z expectation values for each input using given parameters.
+    Uses fast batch extraction if sv_extractor is provided.
     """
+    if sv_extractor is not None:
+        states = sv_extractor.extract(X, params_flat)
+        return compute_expectation_from_states(states)
+        
     orig = model.params.detach().clone()
     model.set_params_flat(torch.tensor(params_flat, dtype=torch.float32))
     with torch.no_grad():
@@ -266,8 +296,8 @@ def deploy(cfg: GSQConfig = None) -> dict:
 
     # ── Branch 1: Ideal (no quantization) ──────────────────────────
     print("  [1/3] Ideal GSQ deployment (continuous params)...")
-    outputs_ideal = get_outputs(model, X_te, theta)
     states_ideal  = sv_extractor.extract(X_te, theta)
+    outputs_ideal = compute_expectation_from_states(states_ideal)
     acc_ideal     = accuracy_from_outputs(outputs_ideal, y_te)
     print(f"        Accuracy: {acc_ideal:.3f}")
 
@@ -275,8 +305,8 @@ def deploy(cfg: GSQConfig = None) -> dict:
     if theta_standard is not None:
         print(f"  [0/3] Standard VQC grid rounding (K={cfg.K})...")
         theta_m0 = grid_round(theta_standard, cfg.K)
-        outputs_m0 = get_outputs(model, X_te, theta_m0)
         states_m0  = sv_extractor.extract(X_te, theta_m0)
+        outputs_m0 = compute_expectation_from_states(states_m0)
         acc_m0     = accuracy_from_outputs(outputs_m0, y_te)
         D_FS_m0    = fubini_study_distortion(states_ideal, states_m0)
         delta_m0   = deployment_shock(outputs_ideal, outputs_m0)
@@ -290,8 +320,8 @@ def deploy(cfg: GSQConfig = None) -> dict:
     theta_euclid   = euclidean_quantize(
         theta, training_trajectory, K=cfg.K, random_state=cfg.seed
     )
-    outputs_euclid = get_outputs(model, X_te, theta_euclid)
     states_euclid  = sv_extractor.extract(X_te, theta_euclid)
+    outputs_euclid = compute_expectation_from_states(states_euclid)
     acc_euclid     = accuracy_from_outputs(outputs_euclid, y_te)
     D_FS_euclid    = fubini_study_distortion(states_ideal, states_euclid)
     delta_euclid   = deployment_shock(outputs_ideal, outputs_euclid)
@@ -310,8 +340,8 @@ def deploy(cfg: GSQConfig = None) -> dict:
         theta, kmeans, alpha=cfg.alpha,
         n_relaxation_steps=cfg.n_relaxation_steps
     )
-    outputs_gsq = get_outputs(model, X_te, theta_gsq)
     states_gsq  = sv_extractor.extract(X_te, theta_gsq)
+    outputs_gsq = compute_expectation_from_states(states_gsq)
     acc_gsq     = accuracy_from_outputs(outputs_gsq, y_te)
     D_FS_gsq    = fubini_study_distortion(states_ideal, states_gsq)
     delta_gsq   = deployment_shock(outputs_ideal, outputs_gsq)

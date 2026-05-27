@@ -7,13 +7,13 @@
   "p_depol": 0.01,
   "p_damping": 0.02,
   "dataset": "two_moons",
-  "epochs": 100,
+  "epochs": 2,
   "lr": 0.05,
   "tau": 0.6,
   "lambda_max": 0.3,
   "k_period": 2,
   "k_rate": 5.0,
-  "n_samples": 400,
+  "n_samples": 50,
   "test_size": 0.25,
   "noise": 0.15,
   "K": 8,
@@ -23,5 +23,5 @@
   "test_acc_every": 5,
   "save_dir": "results/two_moons",
   "fig_dir": "figures",
-  "seed": 46
+  "seed": 42
 }

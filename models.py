@@ -72,8 +72,9 @@ class VQCClassifier(nn.Module):
             else:
                 self.dev = qml.device("qiskit.aer", wires=n_qubits)
         else:
-            dev_backend = "default.mixed" if noise_model != "none" else "default.qubit"
+            dev_backend = "default.mixed" if noise_model != "none" else "lightning.qubit"
             self.dev = qml.device(dev_backend, wires=n_qubits)
+            self.backend = dev_backend
         self.qnode = self._build_qnode()
 
     def _build_qnode(self):
@@ -86,7 +87,8 @@ class VQCClassifier(nn.Module):
         p_damping = self.p_damping
         backend = self.backend
 
-        @qml.qnode(dev, interface="torch", diff_method="parameter-shift")
+        diff_method = "adjoint" if backend == "lightning.qubit" else "parameter-shift"
+        @qml.qnode(dev, interface="torch", diff_method=diff_method)
         def circuit(params, x):
             # Encode input via AngleEmbedding (first n_features qubits)
             qml.AngleEmbedding(x, wires=range(min(n_features, n_qubits)))

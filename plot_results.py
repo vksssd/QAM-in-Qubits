@@ -329,37 +329,118 @@ def plot_tau_ablation_multi(
 
 
 # ─────────────────────────────────────────────
+# Figure 5: Qubit Scale-up Performance Curves
+# ─────────────────────────────────────────────
+
+def plot_qubit_scaling(master_data: dict, save_path: str = None):
+    """
+    Generates a 1x3 panel figure showing scaling performance across N in {4,8,12,16} qubits.
+    Two Moons is shown in solid lines, MNIST is shown in dashed lines.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(10.0, 3.2))
+
+    qubits = master_data["qubit_counts"]
+    x = np.array(qubits)
+
+    # Subplot 0: Test Accuracy Scaling
+    for ds, ls in [("two_moons", "-"), ("mnist", "--")]:
+        for method, color, marker, label in [
+            ("m0", COLORS["m0"], "x", "Standard VQC (m0)"),
+            ("euclidean", COLORS["euclidean"], "s", "Euclidean (m1)"),
+            ("gsq", COLORS["gsq"], "o", "GSQ (m2, ours)")
+        ]:
+            mean = np.array(master_data[ds][method]["accuracy"]["mean"])
+            std  = np.array(master_data[ds][method]["accuracy"]["std"])
+            lbl = f"{label} ({'Moons' if ds == 'two_moons' else 'MNIST'})"
+            axes[0].plot(x, mean, ls=ls, color=color, marker=marker, lw=1.2, markersize=4.0, label=lbl)
+            axes[0].fill_between(x, mean - std, mean + std, color=color, alpha=0.10)
+
+    axes[0].set_xlabel("Number of Qubits $N$")
+    axes[0].set_ylabel("Test Accuracy")
+    axes[0].set_title("(a) Accuracy scaling under noise")
+    axes[0].set_xticks(qubits)
+    axes[0].grid(True, alpha=0.2)
+
+    # Subplot 1: Fubini-Study Distortion Scaling
+    for ds, ls in [("two_moons", "-"), ("mnist", "--")]:
+        for method, color, marker in [
+            ("m0", COLORS["m0"], "x"),
+            ("euclidean", COLORS["euclidean"], "s"),
+            ("gsq", COLORS["gsq"], "o")
+        ]:
+            mean = np.array(master_data[ds][method]["D_FS"]["mean"])
+            std  = np.array(master_data[ds][method]["D_FS"]["std"])
+            axes[1].plot(x, mean, ls=ls, color=color, marker=marker, lw=1.2, markersize=4.0)
+            axes[1].fill_between(x, mean - std, mean + std, color=color, alpha=0.10)
+
+    axes[1].set_xlabel("Number of Qubits $N$")
+    axes[1].set_ylabel(r"$D_{\mathrm{FS}}$ (FS distortion)")
+    axes[1].set_title(r"(b) State distortion $D_{\mathrm{FS}}$ scaling")
+    axes[1].set_xticks(qubits)
+    axes[1].grid(True, alpha=0.2)
+
+    # Subplot 2: Operational Deployment Shock Scaling
+    for ds, ls in [("two_moons", "-"), ("mnist", "--")]:
+        for method, color, marker in [
+            ("m0", COLORS["m0"], "x"),
+            ("euclidean", COLORS["euclidean"], "s"),
+            ("gsq", COLORS["gsq"], "o")
+        ]:
+            mean = np.array(master_data[ds][method]["delta"]["mean"])
+            std  = np.array(master_data[ds][method]["delta"]["std"])
+            axes[2].plot(x, mean, ls=ls, color=color, marker=marker, lw=1.2, markersize=4.0)
+            axes[2].fill_between(x, mean - std, mean + std, color=color, alpha=0.10)
+
+    axes[2].set_xlabel("Number of Qubits $N$")
+    axes[2].set_ylabel(r"Deployment shock $\Delta$")
+    axes[2].set_title(r"(c) Operational shock $\Delta$ scaling")
+    axes[2].set_xticks(qubits)
+    axes[2].grid(True, alpha=0.2)
+
+    # Place unique legends inside Subplot 0
+    axes[0].legend(fontsize=6, loc="lower left")
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+        png_path = save_path.replace(".pdf", ".png")
+        plt.savefig(png_path, bbox_inches="tight", dpi=300)
+        print(f"  Saved: {save_path} and {png_path}")
+    plt.close()
+
+
+# ─────────────────────────────────────────────
 # Main Loading & Execution
 # ─────────────────────────────────────────────
 
 def main(save_dir: str = "results", fig_dir: str = "figures"):
     os.makedirs(fig_dir, exist_ok=True)
 
-    # --- 1. Load History & Configs ---
-    hist_tm_path = os.path.join(save_dir, "two_moons", "train_history.json")
-    hist_mn_path = os.path.join(save_dir, "mnist", "train_history.json")
+    # Load 4-qubit baseline curves for Figures 1-4
+    hist_tm_path = os.path.join(save_dir, "two_moons", "q4", "train_history.json")
+    hist_mn_path = os.path.join(save_dir, "mnist", "q4", "train_history.json")
     
     with open(hist_tm_path) as f:
         history_tm = json.load(f)
     with open(hist_mn_path) as f:
         history_mn = json.load(f)
 
-    # Load tau configurations
+    # Load 4-qubit tau configurations
     tau_tm = 0.6
-    cfg_tm_path = os.path.join(save_dir, "two_moons", "config.json")
+    cfg_tm_path = os.path.join(save_dir, "two_moons", "q4", "config.json")
     if os.path.exists(cfg_tm_path):
         with open(cfg_tm_path) as f:
             tau_tm = json.load(f).get("tau", 0.6)
 
     tau_mn = 0.6
-    cfg_mn_path = os.path.join(save_dir, "mnist", "config.json")
+    cfg_mn_path = os.path.join(save_dir, "mnist", "q4", "config.json")
     if os.path.exists(cfg_mn_path):
         with open(cfg_mn_path) as f:
             tau_mn = json.load(f).get("tau", 0.6)
 
-    # --- 2. Load Statistical Reports ---
-    stat_tm_path = os.path.join(save_dir, "two_moons", "statistical_report.json")
-    stat_mn_path = os.path.join(save_dir, "mnist", "statistical_report.json")
+    # Load 4-qubit Statistical Reports
+    stat_tm_path = os.path.join(save_dir, "two_moons", "q4", "statistical_report.json")
+    stat_mn_path = os.path.join(save_dir, "mnist", "q4", "statistical_report.json")
     
     with open(stat_tm_path) as f:
         stat_tm = json.load(f)
@@ -368,21 +449,21 @@ def main(save_dir: str = "results", fig_dir: str = "figures"):
 
     print("\n>>> Redesigning and compiling all 3-way comparative publication figures...")
 
-    # --- Figure 1: Training Curves ---
+    # --- Figure 1: Training Curves (4-qubit baseline) ---
     plot_training_curves_multi(
         history_tm, history_mn, tau_tm=tau_tm, tau_mn=tau_mn,
         save_path=os.path.join(fig_dir, "fig1_training_curves.pdf")
     )
 
-    # --- Figure 2: Grouped Distortion vs Shock (with error bars) ---
+    # --- Figure 2: Grouped Distortion vs Shock (4-qubit baseline) ---
     plot_dfs_vs_delta_multi(
         stat_tm, stat_mn,
         save_path=os.path.join(fig_dir, "fig2_dfs_delta.pdf")
     )
 
-    # --- Figure 3: Load & Plot K Ablation ---
-    k_tm_path = os.path.join(save_dir, "two_moons", "k_ablation.json")
-    k_mn_path = os.path.join(save_dir, "mnist", "k_ablation.json")
+    # --- Figure 3: Load & Plot K Ablation (4-qubit baseline) ---
+    k_tm_path = os.path.join(save_dir, "two_moons", "q4", "k_ablation.json")
+    k_mn_path = os.path.join(save_dir, "mnist", "q4", "k_ablation.json")
     with open(k_tm_path) as f:
         k_data_tm = json.load(f)
     with open(k_mn_path) as f:
@@ -393,9 +474,9 @@ def main(save_dir: str = "results", fig_dir: str = "figures"):
         save_path=os.path.join(fig_dir, "fig3_k_ablation.pdf")
     )
 
-    # --- Figure 4: Load & Plot Tau Ablation ---
-    tau_tm_path = os.path.join(save_dir, "two_moons", "tau_ablation.json")
-    tau_mn_path = os.path.join(save_dir, "mnist", "tau_ablation.json")
+    # --- Figure 4: Load & Plot Tau Ablation (4-qubit baseline) ---
+    tau_tm_path = os.path.join(save_dir, "two_moons", "q4", "tau_ablation.json")
+    tau_mn_path = os.path.join(save_dir, "mnist", "q4", "tau_ablation.json")
     with open(tau_tm_path) as f:
         tau_data_tm = json.load(f)
     with open(tau_mn_path) as f:
@@ -405,6 +486,16 @@ def main(save_dir: str = "results", fig_dir: str = "figures"):
         tau_data_tm, tau_data_mn,
         save_path=os.path.join(fig_dir, "fig4_tau_ablation.pdf")
     )
+
+    # --- Figure 5: Load & Plot Multi-Qubit Scaling Curves ---
+    master_comp_path = os.path.join(save_dir, "multi_qubit_comparison.json")
+    if os.path.exists(master_comp_path):
+        with open(master_comp_path) as f:
+            master_data = json.load(f)
+        plot_qubit_scaling(
+            master_data,
+            save_path=os.path.join(fig_dir, "fig5_qubit_scaling.pdf")
+        )
 
     print(f"\nSUCCESS: Matplotlib compiled all 3-way comparative figures in '{fig_dir}/'.")
 
